@@ -1,0 +1,15 @@
+[submodule "libraries/adafruit_bus_device"]
+	path = libraries/adafruit_bus_device
+	url = https://github.com/adafruit/Adafruit_CircuitPython_BusDevice
+[submodule "libraries/adafruit_dps310"]
+	path = libraries/adafruit_dps310
+	url = https://github.com/adafruit/Adafruit_CircuitPython_DPS310
+[submodule "libraries/adafruit_mcp2515"]
+	path = libraries/adafruit_mcp2515
+	url = https://github.com/adafruit/Adafruit_CircuitPython_MCP2515
+[submodule "libraries/adafruit_register"]
+	path = libraries/adafruit_register
+	url = https://github.com/adafruit/Adafruit_CircuitPython_Register
+[submodule "libraries/adafruit_ticks.py"]
+	path = libraries/adafruit_ticks.py
+	url = https://github.com/adafruit/Adafruit_CircuitPython_Ticks
