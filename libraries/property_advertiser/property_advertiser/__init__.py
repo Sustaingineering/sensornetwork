@@ -1,3 +1,4 @@
+import sys
 import struct
 from instant import Instant
 
@@ -25,8 +26,8 @@ class StructProperty(BaseProperty):
     try:
       self.value = struct.unpack(self.fmt, msg)
       return True
-    except e:
-      print("WARN: Bad struct packet:", e)
+    except:
+      print("WARN: Bad struct packet:", sys.exc_info()[1])
       return False
   def serializeValue(self): return struct.pack(self.fmt, *self.value)
   def __str__(self): return "StructProperty: " + str(self.value)
@@ -96,6 +97,10 @@ class PropertyRegistry:
   property_expiry = None
   data_timeout = None # Defined in ctor
   
+  warn_count_unknown_id = 0
+  warn_count_corrupt = 0
+  warn_id_local_transition = None
+  
   def __init__(
     self,
     data_timeout = 10000, # Interval after which data is considered expired
@@ -109,32 +114,46 @@ class PropertyRegistry:
     self.property_updates = set()
     self.property_expiry = []
   
+  def flushWarnings(self):
+    warnings = {
+      "count_unknown_id": self.warn_count_unknown_id,
+      "count_corrupt": self.warn_count_corrupt,
+      "id_local_transition": self.warn_id_local_transition
+    }
+    self.warn_count_unknown_id = 0
+    self.warn_count_corrupt = 0
+    self.warn_id_local_transition = None
+    return warnings
+  
   # See `addProperty` for usage
   def setPropEntry(self, prop_entry):
     # The map is done by CAN ID and name, both stored in the same map
     self.properties[prop_entry[0]] = prop_entry
     self.properties[prop_entry[1]] = prop_entry
   def updatePropStatus(self, prop_entry, status):
-    self.setPropEntry((*prop_entry[:3], status))
+    if prop_entry in self.property_expiry: self.property_expiry.remove(prop_entry)
+    prop_entry = (*prop_entry[:3], status)
+    self.setPropEntry(prop_entry)
+    return prop_entry
   
   # Register a new property
   def addProperty(self, can_id, name, prop):
     if int(can_id) & 0x07FF != can_id:
-      raise "Provided CAN ID is not a valid 11-bit CAN identifier. It might be too big"
+      raise Exception("Provided CAN ID is not a valid 11-bit CAN identifier. It might be too big")
     if not isinstance(name, str):
-      raise "Provided name is not a string"
+      raise Exception("Provided name is not a string")
     if can_id in self.properties:
-      raise "Provided CAN ID is already registered"
+      raise Exception("Provided CAN ID is already registered")
     if name in self.properties:
-      raise "Provided name is already registered"
+      raise Exception("Provided name is already registered")
     if not isinstance(prop, BaseProperty):
-      raise "Provided property is not an instance of BaseProperty"
+      raise Exception("Provided property is not an instance of BaseProperty")
     
     self.setPropEntry((can_id, name, prop, NoDataStatus()))
   
   def getPropEntry(self, name_or_can_id):
     if not name_or_can_id in self.properties:
-      raise "Property " + str(name_or_can_id) + " not found"
+      raise Exception("Property " + str(name_or_can_id) + " not found")
     return self.properties[name_or_can_id]
   
   # Marks a proprety as local and flag it for sending
@@ -154,9 +173,9 @@ class PropertyRegistry:
   
   def __setitem__(self, name_or_can_id, value):
     prop_entry = self.getPropEntry(name_or_can_id)
-    prop_entry[2].setValue(value) # Assign the value change
-    self.flagLocalPropertyUpdate(prop_entry) # Record the update for sending
-    self.updatePropStatus(prop_entry, LocalDataStatus())
+    if prop_entry[2].setValue(value): # Assign the value change
+      self.flagLocalPropertyUpdate(prop_entry) # Record the update for sending
+      self.updatePropStatus(prop_entry, LocalDataStatus())
   
   def __iter__(self):
     return filter(lambda s: isinstance(s, str), self.properties.keys())
@@ -164,46 +183,198 @@ class PropertyRegistry:
   # Process an incoming packet
   def receive(self, can_id, msg):
     if not can_id in self.properties:
+      self.warn_count_unknown_id += 1
       print("WARN: Received packet with unknown ID 0x{:03X}".format(can_id))
       return False
     
     prop_entry = self.properties[can_id]
-    if not prop_entry[2].deserializeValue(msg):
-      print("WARN: Failed to decode packet with ID 0x{:03x}. Nothing updated".format(can_id))
+    def deserialize():
+      try: return prop_entry[2].deserializeValue(msg)
+      except:
+        print("WARN: Exception in deserialize:", sys.exc_info()[1])
+        return False
+    if not deserialize():
+      self.warn_count_corrupt += 1
+      print("WARN: Failed to decode packet with ID 0x{:03x}".format(can_id))
       self.updatePropStatus(prop_entry, ErrorStatus())
       return False
     
     if isinstance(prop_entry[3], LocalDataStatus):
+      self.warn_id_local_transition = prop_entry
       print("WARN: Transitioning from local to remote data. Somebody is using a duplicate ID.")
     
-    self.updatePropStatus(prop_entry, RemoteDataStatus(Instant() + self.data_timeout))
+    prop_entry = self.updatePropStatus(
+      prop_entry,
+      RemoteDataStatus(Instant() + self.data_timeout)
+    )
     self.property_expiry.append(prop_entry)
     return True
   
   # Transmit queued updates, remove expired remote properties, and process received messages in the queue
   def eventLoop(self):
+    def send(prop):
+      try: return self.transmitter.send(prop[0], prop[2].serializeValue())
+      except:
+        print("WARN: Exception in transmitter send:", sys.exc_info()[1])
+        return False
+    
     if not self.transmitter is None:
       while self.property_updates:
         prop = self.property_updates.pop()
-        if not self.transmitter.send(prop[0], prop[2].serializeValue()):
-          print("WARN: Failed to send updates for", prop[1])
+        if not send(prop): print("WARN: Failed to send updates for", prop[1])
     
     # Iterate over recent expiries, stop when there's nothing else to expire
     while len(self.property_expiry) and self.property_expiry[0][3].expiry() <= Instant():
       entry = self.property_expiry.pop(0)
       # Double check that nothing has changed since this entry: Get the newest version
       entry = self.properties[entry[0]]
-      if not entry.expiry() is None and entry.expiry() <= Instant():
+      if not entry[3].expiry() is None and entry[3].expiry() <= Instant():
         self.updatePropStatus(entry, ExpiredStatus())
     
     # Process received packets
+    def receive():
+      try: return self.receiver.receive()
+      except:
+        print("WARN: Exception in receiver receive:", sys.exc_info()[1])
+        return True
     if not self.receiver is None:
-      while not (packet := self.receiver.receive()) is None:
-        self.receive(packet[0], packet[1])
+      while not (packet := receive()) is None:
+        try: self.receive(packet[0], packet[1])
+        except:
+          print(
+            "WARN: Exception processing packet with ID 0x{:03X}".format(packet[0]),
+            sys.exc_info()[1]
+          )
   
   def __str__(self):
     def formatProp(propname):
       prop = self.properties[propname]
       return '"{}" ({}) - {}'.format(propname, str(prop[3]), str(prop[2]))
     return '\n'.join(map(formatProp, self))
- 
+
+if __name__ == "__main__":
+  import traceback
+  import time
+  
+  tests = {}
+  failed_tests = set()
+  
+  def test(f):
+    tests[f.__name__] = f
+  
+  @test
+  def StructPropEncoding():
+    prop = StructProperty(">B")
+    prop.setValue((123,))
+    assert(prop.getValue(lambda: None) == (123,))
+    assert(prop.serializeValue() == bytearray([123]))
+  @test
+  def StructPropDecoding():
+    prop = StructProperty(">B")
+    prop.deserializeValue(bytearray([123]))
+    assert(prop.getValue(lambda: None) == (123,))
+  @test
+  def AddPropertyDuplicateCanFails():
+    pr = PropertyRegistry()
+    pr.addProperty(0, "test", BaseProperty())
+    try:
+      pr.addProperty(0, "test2", BaseProperty())
+    except: pass
+    else: assert(False)
+  @test
+  def AddPropertyInvalidCanFails():
+    try:
+      PropertyRegistry().addProperty(0xFFFF, "test", BaseProperty())
+    except: pass
+    else: assert(False)
+  @test
+  def AddPropertyInvalidCanFails2():
+    try:
+      PropertyRegistry().addProperty("notanumber", "test", BaseProperty())
+    except: pass
+    else: assert(False)
+  @test
+  def AddPropertyDuplicateNameFails():
+    pr = PropertyRegistry()
+    pr.addProperty(0, "test", BaseProperty())
+    try:
+      pr.addProperty(1, "test", BaseProperty())
+    except: pass
+    else: assert(False)
+  @test
+  def AddPropertyInvalidNameFails():
+    try:
+      PropertyRegistry().addProperty(0, 123, BaseProperty())
+    except: pass
+    else: assert(False)
+  @test
+  def AddPropertyInvalidNameFails():
+    try:
+      PropertyRegistry().addProperty(0, 123, BaseProperty())
+    except: pass
+    else: assert(False)
+  @test
+  def AddPropertyInvalidFails():
+    try:
+      PropertyRegistry().addProperty(0, "test", {})
+    except: pass
+    else: assert(False)
+  @test
+  def PropertyDefaultsNoData():
+    pr = PropertyRegistry()
+    pr.addProperty(0, "test", BaseProperty())
+    assert(isinstance(pr.getStatus(0), NoDataStatus))
+  @test
+  def PropertyAssignUpdatesStatus():
+    pr = PropertyRegistry()
+    pr.addProperty(0, "test", StructProperty(">B"))
+    pr["test"] = 123
+    assert(isinstance(pr.getStatus(0), LocalDataStatus))
+    assert(pr.property_updates)
+  @test
+  def PropertyReceiveUpdatesStatus():
+    pr = PropertyRegistry(data_timeout=100)
+    pr.addProperty(0, "test", StructProperty(">B"))
+    pr.receive(0, bytearray((123,)))
+    assert(isinstance(pr.getStatus(0), RemoteDataStatus))
+    assert(len(pr.property_expiry))
+    
+    time.sleep(0.1)
+    pr.eventLoop()
+    assert(isinstance(pr.getStatus(0), ExpiredStatus))
+    assert(len(pr.property_expiry) == 0)
+  @test
+  def PropertyReceiveUnknown():
+    pr = PropertyRegistry(data_timeout=100)
+    pr.receive(0, bytearray((123,)))
+    assert(pr.warn_count_unknown_id == 1)
+  @test
+  def PropertyReceiveCorrupt():
+    pr = PropertyRegistry(data_timeout=100)
+    pr.addProperty(0, "test", StructProperty(">B"))
+    pr.receive(0, bytearray())
+    assert(isinstance(pr.getStatus(0), ErrorStatus))
+    assert(pr.warn_count_corrupt == 1)
+  @test
+  def PropertyReceiveTransitionLocal():
+    pr = PropertyRegistry(data_timeout=100)
+    pr.addProperty(0, "test", StructProperty(">B"))
+    pr["test"] = 123
+    pr.receive(0, bytearray((123,)))
+    assert(isinstance(pr.getStatus(0), RemoteDataStatus))
+    assert(not pr.warn_id_local_transition is None)
+  
+  for test in tests.keys():
+    print("Test", test, "----------------")
+    try:
+      tests[test]()
+      print("TEST PASSED")
+    except:
+      failed_tests.add(test)
+      print("TEST FAILED", traceback.format_exc())
+  
+  print()
+  print("All tests complete,", len(failed_tests), "failed")
+  for test in failed_tests:
+    print(test, "FAILED")
+
