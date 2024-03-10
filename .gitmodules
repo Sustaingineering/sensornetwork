@@ -13,3 +13,6 @@
 [submodule "libraries/adafruit_ticks.py"]
 	path = libraries/adafruit_ticks.py
 	url = https://github.com/adafruit/Adafruit_CircuitPython_Ticks
+[submodule "libraries/adafruit_sht4x.py"]
+	path = libraries/adafruit_sht4x.py
+	url = https://github.com/adafruit/Adafruit_CircuitPython_SHT4x
