@@ -11,6 +11,14 @@ class BitField:
   """Serialize a value and return a bytearray"""
   def serialize(self, val): return bytearray()
 
+"""A reserved bitfield. Has no name, always evaluates to zero."""
+class ReservedField:
+  name = None
+  def __init__(self, bitwidth): self.bitwidth = bitwidth
+  def getBitWidth(self): return self.bitwidth
+  def deserialize(self, data): return None
+  def serialize(self, val): return bytearray(math.ceil(self.getBitWidth() / 8))
+
 """A bitfield that encodes a Boolean value"""
 class BoolField:
   """
@@ -149,7 +157,7 @@ class ExtendedStruct:
       bitwidth = field.getBitWidth()
       sl = slice(self.bit_length, self.bit_length + bitwidth)
       self.bit_length += bitwidth
-      self.field_name_mappings[field.name] = (sl, field)
+      if not field.name is None: self.field_name_mappings[field.name] = (sl, field)
     
     self.buf = bytearray(math.ceil(self.bit_length/8))
   
@@ -314,10 +322,13 @@ if __name__ == "__main__":
   
   s = ExtendedStruct(
     BoolField("test"),
-    IntField("test2", 8)
+    IntField("test2", 8),
+    ReservedField(7),
+    IntField("test3", 8)
   )
   s["test"] = True
   s["test2"] = 1
+  s["test3"] = 1
   assert(s["test"] == True)
   assert(s["test2"] == 1)
   print(s)
