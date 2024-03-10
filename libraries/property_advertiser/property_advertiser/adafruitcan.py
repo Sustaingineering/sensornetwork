@@ -1,4 +1,4 @@
-from board import SPI
+import board
 from digitalio import DigitalInOut
 from adafruit_mcp2515.canio import Message, RemoteTransmissionRequest
 from adafruit_mcp2515 import MCP2515 as CAN
@@ -15,15 +15,15 @@ class AdafruitCanReceiver(Receiver):
   def __enter__(self): return self
   def __exit__(self, u1, u2, u3): self.deinit()
   
-  def receive(self, can_id, msg):
-    msg = listener.receive()
+  def receive(self):
+    msg = self.listener.receive()
     return None if msg is None else (msg.id, msg.data)
 
 class FeatherCanInterface(AdafruitCanTransmitter, AdafruitCanReceiver):
   def __init__(self, timeout=2.0):
     cs = DigitalInOut(board.CAN_CS)
     cs.switch_to_output()
-    spi = SPI()
+    spi = board.SPI()
     can_bus = CAN(spi, cs, loopback=False, silent=False)
     AdafruitCanTransmitter.__init__(self, can_bus)
     AdafruitCanReceiver.__init__(self, can_bus, timeout)

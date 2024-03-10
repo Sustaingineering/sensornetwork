@@ -1,4 +1,4 @@
-import sys
+import traceback
 from .base import BaseProperty
 from extendedstruct import *
 
@@ -19,8 +19,8 @@ class ExtendedStructProperty(BaseProperty,ExtendedStruct):
     return self
   def deserializeValue(self, msg):
     try: self.setBytes(msg)
-    except:
-      print("WARN: Bad extended struct packet:", sys.exc_info()[1])
+    except Exception as e:
+      print("WARN: Bad extended struct packet:", traceback.format_exception(e))
       return False
     return True
   def serializeValue(self): return self.getBytes()

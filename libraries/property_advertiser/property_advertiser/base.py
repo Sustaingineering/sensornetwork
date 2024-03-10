@@ -1,4 +1,4 @@
-import sys
+import traceback
 import struct
 from instant import Instant
 
@@ -26,8 +26,8 @@ class StructProperty(BaseProperty):
     try:
       self.value = struct.unpack(self.fmt, msg)
       return True
-    except:
-      print("WARN: Bad struct packet:", sys.exc_info()[1])
+    except Exception as e:
+      print("WARN: Bad struct packet:", traceback.format_exception(e))
       return False
   def serializeValue(self): return struct.pack(self.fmt, *self.value)
   def __str__(self): return "StructProperty: " + str(self.value)
@@ -132,7 +132,7 @@ class PropertyRegistry:
     self.properties[prop_entry[1]] = prop_entry
   def updatePropStatus(self, prop_entry, status):
     if prop_entry in self.property_expiry: self.property_expiry.remove(prop_entry)
-    prop_entry = (*prop_entry[:3], status)
+    prop_entry = prop_entry[:3] + (status,)
     self.setPropEntry(prop_entry)
     return prop_entry
   
@@ -191,8 +191,8 @@ class PropertyRegistry:
     prop_entry = self.properties[can_id]
     def deserialize():
       try: return prop_entry[2].deserializeValue(msg)
-      except:
-        print("WARN: Exception in deserialize:", sys.exc_info()[1])
+      except Exception as e:
+        print("WARN: Exception in deserialize:", traceback.format_exception(e))
         return False
     if not deserialize():
       self.warn_count_corrupt += 1
@@ -215,8 +215,8 @@ class PropertyRegistry:
   def eventLoop(self):
     def send(prop):
       try: return self.transmitter.send(prop[0], prop[2].serializeValue())
-      except:
-        print("WARN: Exception in transmitter send:", sys.exc_info()[1])
+      except Exception as e:
+        print("WARN: Exception in transmitter send:", traceback.format_exception(e))
         return False
     
     if not self.transmitter is None:
@@ -235,16 +235,16 @@ class PropertyRegistry:
     # Process received packets
     def receive():
       try: return self.receiver.receive()
-      except:
-        print("WARN: Exception in receiver receive:", sys.exc_info()[1])
-        return True
+      except Exception as e:
+        print("WARN: Exception in receiver receive:", traceback.format_exception(e))
+        return None
     if not self.receiver is None:
       while not (packet := receive()) is None:
         try: self.receive(packet[0], packet[1])
-        except:
+        except Exception as e:
           print(
             "WARN: Exception processing packet with ID 0x{:03X}".format(packet[0]),
-            sys.exc_info()[1]
+            traceback.format_exception(e)
           )
   
   def __str__(self):
