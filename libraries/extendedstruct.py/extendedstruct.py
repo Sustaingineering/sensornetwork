@@ -194,27 +194,28 @@ class ExtendedStruct:
       if i < 0 or i >= self.bit_length: raise IndexError("Bit outside of struct")
       return (self.buf[math.floor(i/8)] >> (i%8)) & 0x1
     elif isinstance(i, slice):
-      start = max(i.start, 0)
-      stop = min(i.stop, self.bit_length)
-      start_byte = math.floor(start/8)
-      length = stop - start
-      byte_length = math.ceil(length/8)
+      start = 0 if i.start is None else max(i.start, 0)
+      stop = self.bit_length if i.stop is None else min(i.stop, self.bit_length)
       start_offset = start % 8
       stop_offset = 8 - (stop % 8)
       
-      data = self.buf[start_byte:start_byte+byte_length]
+      data = self.buf[math.floor(start/8):math.ceil(stop/8)]
       if not stop_offset == 8: data[-1] &= 0xFF >> stop_offset
       bitShiftBytearrayRight(data, start_offset)
       
-      return data
+      return data[0:math.ceil((stop-start)/8)]
     else:
       if not i in self.field_name_mappings: raise KeyError("Field name not in struct")
       (sl, field) = self.field_name_mappings[i] # Lookup the field object and corresponding slice
       return field.deserialize(self[sl]) # Now return the field object's interpretation of these bits
   
-  def getByteArray(self): return self.buf
+  def getBytes(self): return bytes(self.buf)
+  def setBytes(self, buf):
+    if not len(buf) == len(self.buf): raise ValueError("Invalid struct length")
+    self.buf[:] = buf[:]
   def getBitLength(self): return self.bit_length
   def getByteLength(self): return math.ceil(self.bit_length / 8)
+  def __iter__(self): return iter(self.field_name_mappings.keys())
   
   def __str__(self):
     s = "ExtendedStruct[" + " ".join(map(hex, self.buf)) + "\n"
@@ -309,6 +310,16 @@ if __name__ == "__main__":
   s["c"] = 0.1
   assert(s.buf[2] == 0x2)
   assert(s["c"] == 0.1)
+  print(s)
+  
+  s = ExtendedStruct(
+    BoolField("test"),
+    IntField("test2", 8)
+  )
+  s["test"] = True
+  s["test2"] = 1
+  assert(s["test"] == True)
+  assert(s["test2"] == 1)
   print(s)
   
   #s["a"] = 256 # <- Overflow!

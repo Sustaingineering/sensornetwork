@@ -1,15 +1,21 @@
 from property_advertiser import PropertyRegistry, StructProperty, DummyTransceiver
-from property_advertiser.extendedstruct import ExtendedStructProperty, BoolField, IntField
+
+# We'll make a new type of Property that encodes a single float
+# This will use the StructProperty as a base to encode the data
+class FloatProperty(StructProperty):
+  def __init__(self): super().__init__("!f")
+  def getValue(self, update_callback): return self.value[0]
+  def setValue(self, value):
+    self.value = (value,)
+    return True
+  def __str__(self): return "NO DATA" if self.value is None else str(self.value[0])
 
 # Create a subclass of the property registry with a custom property defined as
 # a FloatProperty (this makes more sense when you read the code below).
 class TestPropertyRegistry(PropertyRegistry):
   def __init__(self, data_timeout = 10000, transmitter = None, receiver = None):
     super().__init__(data_timeout = data_timeout, transmitter = transmitter, receiver = receiver)
-    self.addProperty(0, "TEST", ExtendedStructProperty(
-      BoolField("test"),
-      IntField("test2", 8)
-    ))
+    self.addProperty(0, "TEST", FloatProperty())
 
 # Create a DummyTransceiver: Just sends messages from one registry to the other
 # In a real implementation, this would be replaced with a CAN bus or similar
@@ -31,8 +37,7 @@ print("reg1['TEST'] =", reg1["TEST"]) # Prints: None
 print()
 
 # Now, let's say we assign a property on registry 1...
-reg1["TEST"] = {"test": True}
-reg1["TEST"]["test2"] = 1
+reg1["TEST"] = 1.0
 
 # Before doing anything else, registry 1 will reflect a local property, but
 # registry 2 will still have no data for TEST.

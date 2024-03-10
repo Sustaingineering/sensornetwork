@@ -30,7 +30,7 @@ print(s["c"]) # Prints 0.1 -- Note how the value is truncated to a step of 0.1
 # Show the bitfield contents nicely
 print(s)
 # Print out the encoded struct
-print(s.getByteArray())
+print(s.getBytes())
 
 # Bitfields also error on overflow:
 s["a"] = 256 # <- Overflow!
