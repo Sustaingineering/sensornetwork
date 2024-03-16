@@ -12,7 +12,7 @@ class BitField:
   def serialize(self, val): return bytearray()
 
 """A reserved bitfield. Has no name, always evaluates to zero."""
-class ReservedField:
+class ReservedField(BitField):
   name = None
   def __init__(self, bitwidth): self.bitwidth = bitwidth
   def getBitWidth(self): return self.bitwidth
@@ -20,7 +20,7 @@ class ReservedField:
   def serialize(self, val): return bytearray(math.ceil(self.getBitWidth() / 8))
 
 """A bitfield that encodes a Boolean value"""
-class BoolField:
+class BoolField(BitField):
   """
   Arguments:
     name - The name of the bitfield
@@ -34,7 +34,7 @@ class BoolField:
   A bitfield that encodes a value as an integer. Depending on how you set the scale, you don't actually have to
   assign an integer to this field: An appropriate scale could allow for decimals to be sent.
 """
-class IntField:
+class IntField(BitField):
   """
   Arguments:
     name - The name of the bitfield
@@ -89,6 +89,44 @@ class IntField:
     
     val = (self.base + float(val)*self.scale)
     return val
+
+""" Value for a Enum. See the EnumField """
+class EnumValue:
+  """ Create an Enum value by name and its encoded integer value """
+  def __init__(self, name, int_value):
+    if not isinstance(name, str): raise ValueError("Name provided is not a string")
+    if not isinstance(int_value, int) or int_value < 0: raise ValueError("Int provided is not an int")
+    self.name = name
+    self.int_value = int_value
+  def __str__(self): return self.name
+  def __index__(self): return int(self.int_value)
+  def toInt(self): return int(self.int_value)
+  def __eq__(self, v):
+    return v == self.name or v == self.int_value or (isinstance(v, EnumValue) and v.name == self.name and v.int_value == self.int_value)
+"""
+  A field that encodes an enumeration of possible values. While an IntField can be used to encode a number which
+  corresponds to a particular state, you need to know what that number means; The EnumField decodes that number into
+  something that is human-readable. For more info on the data type, see https://en.wikipedia.org/wiki/Enumerated_type
+"""
+class EnumField(IntField):
+  enum_map = {}
+  default_value = None
+  def __init__(self, name, bitwidth, *values, default_value = None):
+    super().__init__(name, bitwidth, base = 0, scale = 1, signed = False)
+    self.default_value = default_value
+    for value in values:
+      if isinstance(value, tuple) and len(value) == 2: value = EnumValue(value[0], value[1])
+      if not isinstance(value, EnumValue): raise ValueError("Invalid value type")
+      if (value.toInt() >> bitwidth) > 0: raise ValueError("Value {:d} is out of bitfield range".format(int(value)))
+      if str(value) in self.enum_map or value.toInt() in self.enum_map: raise ValueError("Duplicate enum value")
+      self.enum_map[value.toInt()] = value
+      self.enum_map[str(value)] = value
+  def getBitWidth(self): return self.bitwidth
+  def serialize(self, val):
+    return super().serialize(val.toInt()) if isinstance(val, EnumValue) else self.serialize(self.enum_map[val])
+  def deserialize(self, data):
+    decoded = super().deserialize(data)
+    return self.default_value if not decoded in self.enum_map else self.enum_map[decoded]
 
 """Bit shift an entire byte array left. This is like number << bits, but for a bytearray."""
 def bitShiftBytearrayLeft(ba, bits):
@@ -324,13 +362,22 @@ if __name__ == "__main__":
     BoolField("test"),
     IntField("test2", 8),
     ReservedField(7),
-    IntField("test3", 8)
+    IntField("test3", 8),
+    EnumField("test4", 2,
+      EnumValue("a", 0),
+      ("b", 1), # Can create an EnumValue manually, or use tuples
+      EnumValue("c", 2),
+      EnumValue("d", 3)
+    )
   )
   s["test"] = True
   s["test2"] = 1
   s["test3"] = 1
+  s["test4"] = "b"
   assert(s["test"] == True)
   assert(s["test2"] == 1)
+  assert(s["test4"] == "b")
+  assert(isinstance(s["test4"], EnumValue))
   print(s)
   
   #s["a"] = 256 # <- Overflow!
