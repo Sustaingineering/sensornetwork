@@ -91,6 +91,21 @@ class SustaingineeringPropertyRegistry(PropertyRegistry):
       IntField("humidity", 8, base = 0, scale = 100.0/255.0, signed = False), # 0-100 (a percent)
       IntField("pressure", 16, base = 800.0, scale = 0.01, signed = False), # 800hPa - 1455.35 hPa
     ))
+    self.addProperty(sid(DEVICE_WEATHERSTATION, 1), "weatherstation_windspeed", ExtendedStructProperty(
+      IntField("10min", 12, base = 0, scale = 0.1, signed = False), # 0 to 409.6 km/hr
+      IntField("gust", 12, base = 0, scale = 0.1, signed = False), # 0 to 409.6 km/hr
+      IntField("instant", 12, base = 0, scale = 0.1, signed = False), # 0 to 409.6 km/hr
+    )) 
+    self.addProperty(sid(DEVICE_WEATHERSTATION, 2), "weatherstation_winddir", ExtendedStructProperty(
+      IntField("10min", 12, base = 0, scale = 360.0/4096, signed = False), # 0 to 360 deg
+      IntField("gust", 12, base = 0, scale = 360.0/4096, signed = False), # 0 to 360 deg
+      IntField("instant", 12, base = 0, scale = 360.0/4096, signed = False), # 0 to 360 deg
+    ))
+    self.addProperty(sid(DEVICE_WEATHERSTATION, 3), "weatherstation_rain", ExtendedStructProperty(
+      IntField("10min", 12, base = 0, scale = 0.1, signed = False), # 0 to 409.6 mm
+      IntField("hourly", 12, base = 0, scale = 0.1, signed = False), # 0 to 409.6 mm
+      IntField("boot", 4, base = 0, scale = 0.1, signed = False), # 0 to 1.6 mm
+    ))
   
   first_msg = True # Set to true if this is the first message sent
   def assignStatusProperty(self, device_id):
